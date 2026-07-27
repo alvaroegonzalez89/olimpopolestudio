@@ -177,7 +177,7 @@ tr:hover td{background:rgba(255,255,255,0.015);}
   th,td{padding:9px 10px;font-size:12px;}
   .frow{grid-template-columns:1fr;}
   .bottom-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:#151515;border-top:1px solid #222;z-index:200;padding:8px 0 14px;}
-  .bn-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;padding:4px 0;font-size:9px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;transition:color 0.15s;position:relative;}
+  .bn-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 0;font-size:8px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;transition:color 0.15s;position:relative;min-width:0;}
   .bn-item.active{color:var(--fire);}
   .bn-icon{font-size:20px;line-height:1;}
   .bn-badge{position:absolute;top:0;right:50%;transform:translateX(10px);background:var(--fire);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;}
@@ -215,6 +215,7 @@ tr:hover td{background:rgba(255,255,255,0.015);}
     <div class="nav-item" onclick="navTo('cuotas')"><span class="ni">◎</span> Cuotas</div>
     <div class="nav-item" id="nav-prospectos" onclick="navTo('prospectos')"><span class="ni">🎯</span> Inscripción <span class="nav-badge" id="badge-prospectos" style="display:none">0</span></div>
     <div class="nav-item" onclick="navTo('horarios')"><span class="ni">🗓</span> Horarios</div>
+    <div class="nav-item" onclick="navTo('reservas')"><span class="ni">📋</span> Reservas</div>
     <div class="nav-item" onclick="navTo('config')"><span class="ni">⚙</span> Configuración</div>
     <div class="sb-footer">v1.0 · Olimpo Pole Studio</div>
   </nav>
@@ -229,6 +230,7 @@ tr:hover td{background:rgba(255,255,255,0.015);}
   <div class="bn-item" onclick="navTo('cuotas')"><span class="bn-icon">📅</span>Cuotas</div>
   <div class="bn-item" onclick="navTo('prospectos')"><span class="bn-icon">🎯</span>Inscripción<span class="bn-badge" id="bn-badge" style="display:none">0</span></div>
   <div class="bn-item" onclick="navTo('horarios')"><span class="bn-icon">🗓</span>Horarios</div>
+  <div class="bn-item" onclick="navTo('reservas')"><span class="bn-icon">📋</span>Reservas</div>
   <div class="bn-item" onclick="navTo('config')"><span class="bn-icon">⚙</span>Config</div>
 </nav>
 
@@ -286,6 +288,7 @@ tr:hover td{background:rgba(255,255,255,0.015);}
       <div class="fg"><label class="fl">Cupos máximos</label><input class="fi" type="number" id="h-cupos" placeholder="20"/></div>
       <div class="fg"><label class="fl">Instructor</label><input class="fi" id="h-instructor" placeholder="Nombre del profe"/></div>
     </div>
+    <div class="fg"><label class="fl">Cupo para reservas por WhatsApp</label><input class="fi" type="number" id="h-cupo-reservas" placeholder="8"/></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="document.getElementById('modal-horario').style.display='none'">Cancelar</button>
       <button class="btn btn-fire" onclick="guardarHorario()">Guardar horario</button>
@@ -439,12 +442,58 @@ const configCol     = collection(db,"config");
 const horariosCol   = collection(db,"horarios");
 const prospectosCol = collection(db,"prospectos");
 const planesCol      = collection(db,"planes");
+const reservasCol    = collection(db,"reservas");
 document.getElementById("brand-logo-img").src = LOGO_SRC;
 document.getElementById("login-logo-img").src = LOGO_SRC;
 
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_ORDEN = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
-let alumnos=[], horarios=[], prospectos=[], planes=[];
+
+// ── RESERVAS: cálculo de ocurrencias reales de la semana ──
+function pad2(n){ return String(n).padStart(2,"0"); }
+function fechaISO(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+
+function generarOcurrenciasSemana(){
+  const ahora=new Date();
+  const diaJS=ahora.getDay(); // 0=domingo..6=sábado
+  // Lunes de esta semana, a las 00:00
+  const lunesActual=new Date(ahora);
+  lunesActual.setHours(0,0,0,0);
+  lunesActual.setDate(lunesActual.getDate()-((diaJS+6)%7));
+  // A partir del sábado 00:00 se libera también la semana siguiente
+  const incluirProxima=(diaJS===6||diaJS===0);
+  const lunesSiguiente=new Date(lunesActual); lunesSiguiente.setDate(lunesSiguiente.getDate()+7);
+  const semanas=incluirProxima?[lunesActual,lunesSiguiente]:[lunesActual];
+
+  const ocurrencias=[];
+  for(const lunes of semanas){
+    for(const h of horarios){
+      const offsetDias=DIAS_ORDEN.indexOf(h.dia);
+      if(offsetDias<0) continue;
+      const [hh,mm]=(h.hora||"00:00").split(":").map(Number);
+      const fecha=new Date(lunes);
+      fecha.setDate(fecha.getDate()+offsetDias);
+      fecha.setHours(hh||0,mm||0,0,0);
+      if(fecha < ahora) continue; // clase ya pasada, no se muestra
+      const fISO=fechaISO(fecha);
+      const cupo=Number(h.cupoReservas||h.cupos||8);
+      const anotadas=reservas.filter(r=>r.horarioId===h.id&&r.fecha===fISO).length;
+      const libres=cupo-anotadas;
+      const msFaltan=fecha-ahora;
+      const cerradoPorTiempo=msFaltan < 3*60*60*1000;
+      const cerradoPorCupo=libres<=0;
+      ocurrencias.push({
+        horarioId:h.id, dia:h.dia, hora:h.hora, clase:h.clase, fecha, fechaISO:fISO,
+        cupo, anotadas, libres:Math.max(libres,0),
+        cerrado:cerradoPorTiempo||cerradoPorCupo,
+        motivoCerrado:cerradoPorCupo?"cupo":cerradoPorTiempo?"tiempo":null
+      });
+    }
+  }
+  ocurrencias.sort((a,b)=>a.fecha-b.fecha);
+  return ocurrencias;
+}
+let alumnos=[], horarios=[], prospectos=[], planes=[], reservas=[];
 let vistaActual="hero", mesVista=new Date().getMonth(), añoVista=new Date().getFullYear();
 let busqueda="", activoForm=true, pendingDeleteId=null, pendingDeleteType="alumno";
 let _comprobante=null, _transferSocio=null, _pendientesLista=[], _recIdx=0;
@@ -472,6 +521,7 @@ function actualizarBadgeProspectos(){
 // Públicos: no requieren login (los necesita también el formulario de inscripción)
 onSnapshot(horariosCol, snap=>{ horarios=snap.docs.map(d=>({id:d.id,...d.data()})); render(); });
 onSnapshot(planesCol, snap=>{ planes=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.orden||0)-(b.orden||0)); render(); });
+onSnapshot(reservasCol, snap=>{ reservas=snap.docs.map(d=>({id:d.id,...d.data()})); render(); });
 onSnapshot(configCol, snap=>{ snap.docs.forEach(d=>{ if(d.id==="gym"){ gymConfig={...gymConfig,...d.data()}; const el=document.getElementById("sb-gymname"); if(el) el.textContent=gymConfig.nombre; }}); });
 
 // Privados: solo se activan una vez logueado (datos de socias/prospectos)
@@ -487,7 +537,7 @@ function iniciarListenersAdmin(){
 window.navTo=function(v){
   vistaActual=v;
   document.querySelectorAll(".nav-item").forEach(el=>el.classList.remove("active"));
-  const order=["hero","dashboard","alumnos","cuotas","prospectos","horarios","config"];
+  const order=["hero","dashboard","alumnos","cuotas","prospectos","horarios","reservas","config"];
   const items=document.querySelectorAll(".nav-item");
   const idx=order.indexOf(v);
   if(items[idx]) items[idx].classList.add("active");
@@ -503,6 +553,7 @@ function render(){
   if(vistaActual==="cuotas")      main.innerHTML=renderCuotas();
   if(vistaActual==="prospectos")  main.innerHTML=renderProspectos();
   if(vistaActual==="horarios")    main.innerHTML=renderHorarios();
+  if(vistaActual==="reservas")    main.innerHTML=renderReservas();
   if(vistaActual==="config")      main.innerHTML=renderConfig();
 }
 
@@ -767,6 +818,67 @@ function renderHorarios(){
   </div>`;
 }
 
+// ── RESERVAS (admin) ──
+function renderReservas(){
+  const ocurrencias=generarOcurrenciasSemana();
+  const link=`${window.location.origin}${window.location.pathname}?reservar=1`;
+  const filas=ocurrencias.length?ocurrencias.map(o=>{
+    const nombres=reservas.filter(r=>r.horarioId===o.horarioId&&r.fecha===o.fechaISO);
+    const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
+    const estado=o.motivoCerrado==="cupo"?`<span style="color:#ff5050;font-weight:600;">❌ Cupo lleno</span>`
+      :o.motivoCerrado==="tiempo"?`<span style="color:#777;font-weight:600;">🔒 Cerrado (falta &lt;3hs)</span>`
+      :`<span style="color:#06d6a0;font-weight:600;">${o.libres} libre${o.libres!==1?"s":""}</span>`;
+    return `<div class="card" style="margin-bottom:12px;">
+      <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-weight:700;text-transform:capitalize;">${fechaLbl} · ${o.hora}</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">${o.clase} — ${o.anotadas}/${o.cupo} anotadas</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          ${estado}
+          <button class="horario-del" style="position:static;background:rgba(232,196,0,0.12);color:var(--fire);" onclick="abrirEditarHorario('${o.horarioId}')">✎ Cupo</button>
+        </div>
+      </div>
+      ${nombres.length?`<div style="padding:0 20px 16px;display:flex;flex-wrap:wrap;gap:6px;">
+        ${nombres.map(n=>`<span style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:999px;padding:4px 10px 4px 12px;font-size:12px;display:flex;align-items:center;gap:6px;">${n.nombre}<button onclick="eliminarReserva('${n.id}')" style="background:none;border:none;color:#666;cursor:pointer;font-size:12px;">✕</button></span>`).join("")}
+      </div>`:""}
+    </div>`;
+  }).join(""):`<div class="empty">No hay clases disponibles esta semana. Cargá horarios primero.</div>`;
+
+  return `<div class="page">
+    <div class="topbar">
+      <div><div class="eyebrow">Anotate a la clase por WhatsApp</div><div class="page-title">Reservas</div></div>
+    </div>
+    <div class="card" style="margin-bottom:22px;">
+      <div class="card-header"><div class="card-title">🔗 Link para el grupo de WhatsApp</div><div style="font-size:12px;color:#555;">Siempre es el mismo — mandalo una sola vez</div></div>
+      <div style="padding:16px 20px;display:flex;gap:8px;flex-wrap:wrap;">
+        <input class="fi" readonly value="${link}" onclick="this.select()" style="flex:1;min-width:220px;"/>
+        <button class="btn btn-fire" onclick="copiarLinkReservas()">📋 Copiar link</button>
+      </div>
+      <div style="padding:0 20px 16px;font-size:12px;color:#666;line-height:1.6;">
+        Muestra las clases de esta semana. A partir del sábado a la noche se suma también la semana siguiente. Cada clase se cierra sola 3hs antes de empezar, o cuando se llena el cupo.
+      </div>
+    </div>
+    ${filas}
+  </div>`;
+}
+
+window.copiarLinkReservas=async function(){
+  const link=`${window.location.origin}${window.location.pathname}?reservar=1`;
+  try{
+    await navigator.clipboard.writeText(link);
+    toast("Link copiado ✓");
+  }catch(e){
+    toast("Tocá el campo y copiá manualmente","err");
+  }
+}
+
+window.eliminarReserva=async function(id){
+  if(!confirm("¿Quitar esta reserva?")) return;
+  await deleteDoc(doc(db,"reservas",id));
+  toast("Reserva eliminada");
+}
+
 // CONFIG
 function renderConfig(){
   return `<div class="page">
@@ -950,7 +1062,92 @@ window.enviarInscripcion=async function(){
   </div>`;
 }
 
-// PROSPECTOS ACCIONES
+// ── RESERVAS POR WHATSAPP (público) ──
+window.mostrarReservasPublico=function(){
+  const ocurrencias=generarOcurrenciasSemana();
+  window._ocurrenciasReserva=ocurrencias;
+  const items=ocurrencias.length?ocurrencias.map((o,i)=>{
+    const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
+    const estadoTxt=o.motivoCerrado==="cupo"?"❌ Cupo lleno":o.motivoCerrado==="tiempo"?"🔒 Cerrado (falta menos de 3hs)":`${o.libres} lugar${o.libres!==1?"es":""} libre${o.libres!==1?"s":""}`;
+    return `<div class="rv-card">
+      <div class="rv-info">
+        <div class="rv-fecha">${fechaLbl} · ${o.hora}</div>
+        <div class="rv-clase">${o.clase}</div>
+        <div class="rv-cupo ${o.cerrado?"rv-cerrado":"rv-abierto"}">${estadoTxt}</div>
+      </div>
+      ${o.cerrado
+        ?`<button class="rv-btn" disabled>Cerrado</button>`
+        :`<button class="rv-btn" id="rv-toggle-${i}" onclick="toggleReservaForm(${i})">Reservar</button>`}
+      <div class="rv-form" id="rv-form-${i}" style="display:none;">
+        <input class="fi" id="rv-nombre-${i}" placeholder="Tu nombre" onkeydown="if(event.key==='Enter')confirmarReserva(${i})"/>
+        <button class="btn-submit" style="margin-top:8px;padding:11px;" onclick="confirmarReserva(${i})">Confirmar reserva</button>
+      </div>
+    </div>`;
+  }).join(""):`<div style="text-align:center;color:#555;padding:30px 10px;">No hay clases disponibles por ahora.</div>`;
+
+  document.body.innerHTML=`
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#0a0a0a;color:#f0f0f0;font-family:'Outfit',sans-serif;min-height:100vh;padding:20px;}
+    .rv-wrap{max-width:480px;margin:0 auto;}
+    .rv-hero{text-align:center;padding:10px 0 24px;}
+    .rv-hero img{width:64px;height:64px;object-fit:contain;background:#000;border-radius:12px;padding:4px;margin-bottom:10px;}
+    .rv-title{font-family:'Anton',sans-serif;font-size:26px;letter-spacing:1px;}
+    .rv-sub{font-size:13px;color:#999;margin-top:4px;}
+    .rv-card{background:#141414;border:1px solid #232323;border-radius:14px;padding:16px 18px;margin-bottom:12px;}
+    .rv-fecha{font-weight:700;text-transform:capitalize;font-size:15px;}
+    .rv-clase{font-size:13px;color:#999;margin-top:2px;}
+    .rv-cupo{font-size:12px;font-weight:600;margin-top:8px;}
+    .rv-abierto{color:#06d6a0;}
+    .rv-cerrado{color:#666;}
+    .rv-btn{width:100%;margin-top:12px;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,#E8C400,#FFEA00);color:#0a0a0a;font-weight:700;font-size:14px;cursor:pointer;}
+    .rv-btn:disabled{background:#1c1c1c;color:#555;cursor:not-allowed;}
+    .rv-form{margin-top:12px;}
+    .fi{width:100%;padding:11px 13px;background:#0f0f0f;border:1px solid #262626;border-radius:10px;color:#f0f0f0;font-size:14px;font-family:'Outfit',sans-serif;}
+    .fi:focus{outline:none;border-color:var(--fire,#E8C400);}
+    .btn-submit{width:100%;background:linear-gradient(135deg,#E8C400,#FFEA00);color:#0a0a0a;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;}
+    .rv-foot{text-align:center;font-size:11px;color:#333;margin-top:20px;}
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <div class="rv-wrap">
+    <div class="rv-hero">
+      <img src="${LOGO_SRC}" alt="Olimpo Pole Studio"/>
+      <div class="rv-title">RESERVÁ TU CLASE</div>
+      <div class="rv-sub">Elegí tu clase de la semana — se cierra 3hs antes de empezar</div>
+    </div>
+    ${items}
+    <div class="rv-foot">${gymConfig.nombre} · Barcala 359</div>
+  </div>`;
+}
+
+window.toggleReservaForm=function(i){
+  const el=document.getElementById(`rv-form-${i}`);
+  if(el) el.style.display=el.style.display==="none"?"block":"none";
+}
+
+window.confirmarReserva=async function(i){
+  const o=window._ocurrenciasReserva[i];
+  if(!o) return;
+  const input=document.getElementById(`rv-nombre-${i}`);
+  const nombre=input.value.trim();
+  if(!nombre){ alert("Escribí tu nombre para reservar."); return; }
+  if(o.libres<=0){ alert("Uy, se acaba de llenar el cupo de esta clase."); mostrarReservasPublico(); return; }
+  await addDoc(reservasCol,{
+    horarioId:o.horarioId, fecha:o.fechaISO, dia:o.dia, hora:o.hora, clase:o.clase,
+    nombre, creado:new Date().toISOString()
+  });
+  document.body.innerHTML=`
+  <style>*{box-sizing:border-box;margin:0;padding:0;}body{background:#0a0a0a;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Outfit',sans-serif;padding:20px;}</style>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet"/>
+  <div style="background:#141414;border:1px solid #06d6a0;border-radius:18px;padding:44px 30px;text-align:center;max-width:380px;color:#f0f0f0;">
+    <div style="font-size:52px;margin-bottom:14px;">✅</div>
+    <div style="font-family:'Anton',sans-serif;font-size:24px;color:#06d6a0;margin-bottom:8px;">¡Reserva confirmada!</div>
+    <div style="font-size:14px;color:#999;line-height:1.7;margin-bottom:22px;">
+      ${nombre}, te anotamos en <strong style="color:#f0f0f0;">${o.clase}</strong> del ${o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"})} a las ${o.hora}.
+    </div>
+    <div style="font-size:12px;color:#333;">— ${gymConfig.nombre}</div>
+  </div>`;
+}
 window.verProspecto=function(id){
   const p=prospectos.find(x=>x.id===id);
   if(!p) return;
@@ -1032,7 +1229,7 @@ const PLANES_OLIMPO=[
 async function sembrarHorariosOlimpo(){
   const yaExiste=(h)=>horarios.some(x=>x.dia===h.dia&&x.hora===h.hora&&x.clase===h.clase);
   const faltantes=HORARIOS_OLIMPO.filter(h=>!yaExiste(h));
-  for(const h of faltantes){ await addDoc(horariosCol,{...h,cupos:12,instructor:""}); }
+  for(const h of faltantes){ await addDoc(horariosCol,{...h,cupos:8,instructor:""}); }
   return faltantes.length;
 }
 
@@ -1073,7 +1270,7 @@ window.cargarHorariosIniciales=async function(){
 window.abrirNuevoHorario=function(){
   document.getElementById("modal-horario-titulo").textContent="Nuevo horario";
   document.getElementById("h-id").value="";
-  ["h-hora","h-clase","h-cupos","h-instructor"].forEach(id=>document.getElementById(id).value="");
+  ["h-hora","h-clase","h-cupos","h-instructor","h-cupo-reservas"].forEach(id=>document.getElementById(id).value="");
   document.getElementById("h-dia").value="Lunes";
   document.getElementById("modal-horario").style.display="flex";
 }
@@ -1087,6 +1284,7 @@ window.abrirEditarHorario=function(id){
   document.getElementById("h-clase").value=h.clase||"";
   document.getElementById("h-cupos").value=h.cupos||"";
   document.getElementById("h-instructor").value=h.instructor||"";
+  document.getElementById("h-cupo-reservas").value=h.cupoReservas||"";
   document.getElementById("modal-horario").style.display="flex";
 }
 
@@ -1098,7 +1296,8 @@ window.guardarHorario=async function(){
     dia:document.getElementById("h-dia").value,
     hora, clase,
     cupos:Number(document.getElementById("h-cupos").value||20),
-    instructor:document.getElementById("h-instructor").value.trim()
+    instructor:document.getElementById("h-instructor").value.trim(),
+    cupoReservas:Number(document.getElementById("h-cupo-reservas").value||8)
   };
   const hId=document.getElementById("h-id").value;
   if(hId) await updateDoc(doc(db,"horarios",hId),data);
@@ -1370,6 +1569,10 @@ if(params.get("inscripcion")==="1"){
   // Formulario público: no requiere login, solo espera a que carguen horarios
   document.getElementById("app-shell").style.display="none";
   setTimeout(mostrarFormularioInscripcion, 800);
+} else if(params.get("reservar")==="1"){
+  // Reservas de WhatsApp: público, no requiere login
+  document.getElementById("app-shell").style.display="none";
+  setTimeout(mostrarReservasPublico, 800);
 } else {
   onAuthStateChanged(auth, user=>{
     if(user){
