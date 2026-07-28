@@ -519,10 +519,38 @@ function actualizarBadgeProspectos(){
 
 // LISTENERS
 // Públicos: no requieren login (los necesita también el formulario de inscripción)
-onSnapshot(horariosCol, snap=>{ horarios=snap.docs.map(d=>({id:d.id,...d.data()})); render(); });
-onSnapshot(planesCol, snap=>{ planes=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.orden||0)-(b.orden||0)); render(); });
-onSnapshot(reservasCol, snap=>{ reservas=snap.docs.map(d=>({id:d.id,...d.data()})); render(); });
-onSnapshot(configCol, snap=>{ snap.docs.forEach(d=>{ if(d.id==="gym"){ gymConfig={...gymConfig,...d.data()}; const el=document.getElementById("sb-gymname"); if(el) el.textContent=gymConfig.nombre; }}); });
+let _listo={horarios:false,planes:false,reservas:false,config:false};
+let vistaPublica=null; // "inscripcion" | "reservar" | null
+
+onSnapshot(horariosCol,
+  snap=>{ horarios=snap.docs.map(d=>({id:d.id,...d.data()})); _listo.horarios=true; render(); reRenderPublicaSiCorresponde(); },
+  err=>{ console.error("Error leyendo horarios:",err); _listo.horarios=true; reRenderPublicaSiCorresponde(); }
+);
+onSnapshot(planesCol,
+  snap=>{ planes=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.orden||0)-(b.orden||0)); _listo.planes=true; render(); reRenderPublicaSiCorresponde(); },
+  err=>{ console.error("Error leyendo planes:",err); _listo.planes=true; reRenderPublicaSiCorresponde(); }
+);
+onSnapshot(reservasCol,
+  snap=>{ reservas=snap.docs.map(d=>({id:d.id,...d.data()})); _listo.reservas=true; render(); reRenderPublicaSiCorresponde(); },
+  err=>{ console.error("Error leyendo reservas:",err); _listo.reservas=true; reRenderPublicaSiCorresponde(); }
+);
+onSnapshot(configCol,
+  snap=>{ snap.docs.forEach(d=>{ if(d.id==="gym"){ gymConfig={...gymConfig,...d.data()}; const el=document.getElementById("sb-gymname"); if(el) el.textContent=gymConfig.nombre; }}); _listo.config=true; },
+  err=>{ console.error("Error leyendo config:",err); _listo.config=true; }
+);
+
+// Vuelve a dibujar la página pública activa cuando llegan datos nuevos de Firestore
+// (evita que quede pegada en "no hay clases" si el primer dato tardó en llegar)
+function reRenderPublicaSiCorresponde(){
+  if(vistaPublica==="reservar" && typeof window.mostrarReservasPublico==="function" && !document.getElementById("app-shell")) mostrarReservasPublico();
+}
+
+// Espera a que los datos necesarios hayan llegado al menos una vez (con tope de seguridad)
+function esperarDatosPublicos(claves, cb, intentos=0){
+  const listo=claves.every(k=>_listo[k]);
+  if(listo || intentos>30){ cb(); return; } // 30 x 150ms = 4.5s de tope máximo
+  setTimeout(()=>esperarDatosPublicos(claves,cb,intentos+1),150);
+}
 
 // Privados: solo se activan una vez logueado (datos de socias/prospectos)
 let _listenersAdminActivos=false;
@@ -1566,13 +1594,15 @@ window.cerrarSesion=async function(){
 // INIT — detectar si es formulario público
 const params=new URLSearchParams(window.location.search);
 if(params.get("inscripcion")==="1"){
-  // Formulario público: no requiere login, solo espera a que carguen horarios
+  // Formulario público: no requiere login, espera a que lleguen horarios y planes de verdad
+  vistaPublica="inscripcion";
   document.getElementById("app-shell").style.display="none";
-  setTimeout(mostrarFormularioInscripcion, 800);
+  esperarDatosPublicos(["horarios","planes"], mostrarFormularioInscripcion);
 } else if(params.get("reservar")==="1"){
-  // Reservas de WhatsApp: público, no requiere login
+  // Reservas de WhatsApp: público, espera a que lleguen horarios y reservas de verdad
+  vistaPublica="reservar";
   document.getElementById("app-shell").style.display="none";
-  setTimeout(mostrarReservasPublico, 800);
+  esperarDatosPublicos(["horarios","reservas"], mostrarReservasPublico);
 } else {
   onAuthStateChanged(auth, user=>{
     if(user){
