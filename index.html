@@ -1053,6 +1053,7 @@ function mostrarFormularioInscripcion(){
     </div>
     <div class="form-body">
       <div class="fg"><label class="fl">Nombre completo *</label><input class="fi" id="ins-nombre" placeholder="Nombre y apellido"/></div>
+      <div class="fg"><label class="fl">DNI *</label><input class="fi" id="ins-documento" type="tel" inputmode="numeric" placeholder="30123456"/></div>
       <div class="fg"><label class="fl">Teléfono *</label><input class="fi" id="ins-tel" placeholder="2604811028" type="tel"/></div>
       <div class="fg"><label class="fl">Email</label><input class="fi" id="ins-email" placeholder="tu@email.com" type="email"/></div>
       <div class="fg"><label class="fl">Horario de preferencia</label>
@@ -1077,9 +1078,10 @@ function mostrarFormularioInscripcion(){
 window.enviarInscripcion=async function(){
   const nombre=document.getElementById("ins-nombre").value.trim();
   const tel=document.getElementById("ins-tel").value.trim();
-  if(!nombre||!tel){ alert("Completá nombre y teléfono para continuar."); return; }
+  const documento=document.getElementById("ins-documento").value.trim().replace(/\D/g,"");
+  if(!nombre||!tel||!documento){ alert("Completá nombre, DNI y teléfono para continuar."); return; }
   const data={
-    nombre, telefono:tel,
+    nombre, telefono:tel, documento,
     email:document.getElementById("ins-email").value.trim(),
     horario:document.getElementById("ins-horario").value,
     plan:document.getElementById("ins-plan").value,
@@ -1264,6 +1266,7 @@ window.verProspecto=function(id){
   document.getElementById("prospecto-detalle").innerHTML=`
     <div style="display:flex;flex-direction:column;gap:12px;">
       <div style="display:flex;justify-content:space-between;"><span style="color:#555;">👤 Nombre</span><strong>${p.nombre}</strong></div>
+      <div style="display:flex;justify-content:space-between;"><span style="color:#555;">🪪 DNI</span><span>${p.documento||"—"}</span></div>
       <div style="display:flex;justify-content:space-between;"><span style="color:#555;">📞 Teléfono</span><span>${p.telefono||"—"}</span></div>
       <div style="display:flex;justify-content:space-between;"><span style="color:#555;">📧 Email</span><span>${p.email||"—"}</span></div>
       <div style="display:flex;justify-content:space-between;"><span style="color:#555;">🗓 Horario preferido</span><span>${p.horario||"Sin preferencia"}</span></div>
@@ -1290,13 +1293,20 @@ window.contactarProspecto=function(id){
 window.convertirProspecto=async function(id){
   const p=prospectos.find(x=>x.id===id);
   if(!p) return;
+  const plan=(!p.plan||p.plan==="Quiero info primero"||p.plan==="Clase de prueba gratis")?"Pole Sport x8":p.plan;
+  const documento=p.documento||"";
   // Agregar como socio
   await addDoc(alumnosCol,{
-    nombre:p.nombre, email:p.email||"", telefono:p.telefono||"",
-    plan:(!p.plan||p.plan==="Quiero info primero"||p.plan==="Clase de prueba gratis")?"Pole Sport x8":p.plan,
+    nombre:p.nombre, email:p.email||"", telefono:p.telefono||"", documento,
+    plan, clasesTotales:clasesDePlan(plan),
     monto:0, activo:true,
     fechaAlta:new Date().toISOString().slice(0,10), cuotas:{}
   });
+  // Sincroniza el índice público mínimo (para que el link de Reservas la reconozca por DNI)
+  if(documento){
+    try{ await setDoc(doc(db,"socias_publicas",documento),{nombre:p.nombre,plan,activo:true,clasesTotales:clasesDePlan(plan)}); }
+    catch(e){ console.error("Error sincronizando socias_publicas:",e); }
+  }
   // Marcar prospecto como confirmado
   await updateDoc(doc(db,"prospectos",id),{estado:"confirmado"});
   document.getElementById("modal-prospecto").style.display="none";
