@@ -241,7 +241,7 @@ tr:hover td{background:rgba(255,255,255,0.015);}
     <input type="hidden" id="edit-id"/>
     <div class="fg"><label class="fl">Nombre completo</label><input class="fi" id="f-nombre" placeholder="Ej: Juan Pérez"/></div>
     <div class="frow">
-      <div class="fg"><label class="fl">DNI</label><input class="fi" id="f-documento" placeholder="30123456"/></div>
+      <div class="fg"><label class="fl">DNI (solo números, sin puntos)</label><input class="fi" id="f-documento" type="tel" inputmode="numeric" placeholder="30123456"/></div>
       <div class="fg"><label class="fl">Teléfono</label><input class="fi" id="f-tel" placeholder="1123456789"/></div>
     </div>
     <div class="fg"><label class="fl">Email</label><input class="fi" id="f-email" placeholder="juan@email.com"/></div>
@@ -714,7 +714,7 @@ function renderAlumnos(){
       <div><div class="eyebrow">Gestión</div><div class="page-title">Socios</div></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <div class="search-wrap"><span class="search-icon">🔍</span><input placeholder="Buscar socio..." value="${busqueda}" oninput="filtrar(this.value)"/></div>
-        <button class="btn btn-ghost" onclick="copiarLinkInscripcion()">🔗 Link inscripción</button>
+        <button class="btn btn-ghost" onclick="copiarLinkInscripcion()" title="Para gente nueva que todavía no es socia — no confundir con el link de Reservas">🔗 Link inscripción (nuevas)</button>
         <button class="btn btn-fire" onclick="abrirNuevo()">+ Nuevo socio</button>
       </div>
     </div>
@@ -1020,6 +1020,16 @@ window.copiarLinkInscripcion=function(){
 }
 
 // ── FORMULARIO PÚBLICO ──
+function mostrarAvisoInscripcion(titulo,texto){
+  document.body.innerHTML=`
+  <style>*{box-sizing:border-box;margin:0;padding:0;}body{background:#0f0f11;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Outfit',sans-serif;padding:20px;}</style>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet"/>
+  <div style="background:#161616;border:1px solid #E8C400;border-radius:18px;padding:44px 32px;text-align:center;max-width:400px;">
+    <div style="font-size:52px;margin-bottom:14px;">✋</div>
+    <div style="font-family:'Anton',sans-serif;font-size:22px;color:#FFEA00;margin-bottom:10px;">${titulo}</div>
+    <div style="font-size:14px;color:#999;line-height:1.7;">${texto}</div>
+  </div>`;
+}
 function mostrarFormularioInscripcion(){
   const horariosOpts=horarios.length
     ?horarios.sort((a,b)=>DIAS_ORDEN.indexOf(a.dia)-DIAS_ORDEN.indexOf(b.dia))
@@ -1080,6 +1090,24 @@ window.enviarInscripcion=async function(){
   const tel=document.getElementById("ins-tel").value.trim();
   const documento=document.getElementById("ins-documento").value.trim().replace(/\D/g,"");
   if(!nombre||!tel||!documento){ alert("Completá nombre, DNI y teléfono para continuar."); return; }
+
+  const btn=document.querySelector(".btn-submit");
+  if(btn){ btn.disabled=true; btn.textContent="Comprobando..."; }
+  try{
+    // ¿Ya es socia?
+    const socia=await getDoc(doc(db,"socias_publicas",documento));
+    if(socia.exists()){
+      mostrarAvisoInscripcion(`Ya sos socia de ${gymConfig.nombre} 🎉`,`Con este DNI ya tenés una cuenta activa — no hace falta que te inscribas de nuevo. Para reservar tu próxima clase, usá el link que te compartimos en el grupo de WhatsApp.`);
+      return;
+    }
+    // ¿Ya mandó una inscripción pendiente?
+    const pendiente=await getDoc(doc(db,"inscripciones_dni",documento));
+    if(pendiente.exists()){
+      mostrarAvisoInscripcion("Ya recibimos tu inscripción 👋","Estamos revisando tus datos, en breve nos ponemos en contacto. No hace falta que la mandes de nuevo.");
+      return;
+    }
+  }catch(e){ console.error("Error chequeando DNI:",e); }
+
   const data={
     nombre, telefono:tel, documento,
     email:document.getElementById("ins-email").value.trim(),
@@ -1089,7 +1117,9 @@ window.enviarInscripcion=async function(){
     estado:"nuevo",
     fecha:new Date().toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit",year:"numeric"})
   };
-  await addDoc(prospectosCol, data);
+  const nuevoProspecto=await addDoc(prospectosCol, data);
+  try{ await setDoc(doc(db,"inscripciones_dni",documento),{prospectoId:nuevoProspecto.id,fecha:new Date().toISOString()}); }
+  catch(e){ console.error("Error registrando inscripciones_dni:",e); }
   document.body.innerHTML=`
   <style>*{box-sizing:border-box;margin:0;padding:0;}body{background:#0f0f11;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Outfit',sans-serif;}</style>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet"/>
@@ -1276,9 +1306,21 @@ window.verProspecto=function(id){
     </div>`;
   document.getElementById("prospecto-actions").innerHTML=`
     <button class="btn btn-ghost" onclick="document.getElementById('modal-prospecto').style.display='none'">Cerrar</button>
+    <button class="btn btn-danger" onclick="descartarProspecto('${p.id}')">🗑 Descartar</button>
     <button class="btn btn-success" onclick="contactarProspecto('${p.id}')">📲 WhatsApp</button>
     <button class="btn btn-fire" onclick="convertirProspecto('${p.id}')">✓ Confirmar como socio</button>`;
   document.getElementById("modal-prospecto").style.display="flex";
+}
+
+window.descartarProspecto=async function(id){
+  if(!confirm("¿Descartar esta inscripción? No se puede deshacer.")) return;
+  const p=prospectos.find(x=>x.id===id);
+  await deleteDoc(doc(db,"prospectos",id));
+  if(p?.documento){
+    try{ await deleteDoc(doc(db,"inscripciones_dni",p.documento)); }catch(e){ console.error("Error limpiando inscripciones_dni:",e); }
+  }
+  document.getElementById("modal-prospecto").style.display="none";
+  toast("Inscripción descartada");
 }
 
 window.contactarProspecto=function(id){
@@ -1304,7 +1346,10 @@ window.convertirProspecto=async function(id){
   });
   // Sincroniza el índice público mínimo (para que el link de Reservas la reconozca por DNI)
   if(documento){
-    try{ await setDoc(doc(db,"socias_publicas",documento),{nombre:p.nombre,plan,activo:true,clasesTotales:clasesDePlan(plan)}); }
+    try{
+      await setDoc(doc(db,"socias_publicas",documento),{nombre:p.nombre,plan,activo:true,clasesTotales:clasesDePlan(plan)});
+      await deleteDoc(doc(db,"inscripciones_dni",documento));
+    }
     catch(e){ console.error("Error sincronizando socias_publicas:",e); }
   }
   // Marcar prospecto como confirmado
@@ -1635,7 +1680,7 @@ window.guardarAlumno=async function(){
   const nombre=document.getElementById("f-nombre").value.trim();
   const monto=document.getElementById("f-monto").value;
   if(!nombre||!monto) return toast("Completá nombre y monto","err");
-  const documento=document.getElementById("f-documento").value.trim();
+  const documento=document.getElementById("f-documento").value.trim().replace(/\D/g,"");
   const plan=document.getElementById("f-plan").value;
   const data={nombre,monto:Number(monto),activo:activoForm,email:document.getElementById("f-email").value.trim(),telefono:document.getElementById("f-tel").value.trim(),plan,documento,clasesTotales:clasesDePlan(plan)};
   const editId=document.getElementById("edit-id").value;
