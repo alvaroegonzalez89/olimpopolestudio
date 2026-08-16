@@ -444,6 +444,7 @@ const horariosCol   = collection(db,"horarios");
 const prospectosCol = collection(db,"prospectos");
 const planesCol      = collection(db,"planes");
 const reservasCol    = collection(db,"reservas");
+const cancelacionesCol = collection(db,"cancelaciones");
 document.getElementById("brand-logo-img").src = LOGO_SRC;
 document.getElementById("login-logo-img").src = LOGO_SRC;
 
@@ -477,6 +478,7 @@ function generarOcurrenciasSemana(){
       fecha.setHours(hh||0,mm||0,0,0);
       if(fecha < ahora) continue; // clase ya pasada, no se muestra
       const fISO=fechaISO(fecha);
+      const cancelada=cancelaciones.some(c=>c.horarioId===h.id&&c.fecha===fISO);
       const cupo=Number(h.cupoReservas||h.cupos||8);
       const anotadas=reservas.filter(r=>r.horarioId===h.id&&r.fecha===fISO).length;
       const libres=cupo-anotadas;
@@ -486,15 +488,16 @@ function generarOcurrenciasSemana(){
       ocurrencias.push({
         horarioId:h.id, dia:h.dia, hora:h.hora, clase:h.clase, fecha, fechaISO:fISO,
         cupo, anotadas, libres:Math.max(libres,0),
-        cerrado:cerradoPorTiempo||cerradoPorCupo,
-        motivoCerrado:cerradoPorCupo?"cupo":cerradoPorTiempo?"tiempo":null
+        cancelada,
+        cerrado:cancelada||cerradoPorTiempo||cerradoPorCupo,
+        motivoCerrado:cancelada?"cancelada":cerradoPorCupo?"cupo":cerradoPorTiempo?"tiempo":null
       });
     }
   }
   ocurrencias.sort((a,b)=>a.fecha-b.fecha);
   return ocurrencias;
 }
-let alumnos=[], horarios=[], prospectos=[], planes=[], reservas=[];
+let alumnos=[], horarios=[], prospectos=[], planes=[], reservas=[], cancelaciones=[];
 let vistaActual="hero", mesVista=new Date().getMonth(), añoVista=new Date().getFullYear();
 let busqueda="", activoForm=true, pendingDeleteId=null, pendingDeleteType="alumno";
 let _comprobante=null, _transferSocio=null, _pendientesLista=[], _recIdx=0;
@@ -520,7 +523,7 @@ function actualizarBadgeProspectos(){
 
 // LISTENERS
 // Públicos: no requieren login (los necesita también el formulario de inscripción)
-let _listo={horarios:false,planes:false,reservas:false,config:false};
+let _listo={horarios:false,planes:false,reservas:false,config:false,cancelaciones:false};
 let vistaPublica=null; // "inscripcion" | "reservar" | null
 
 onSnapshot(horariosCol,
@@ -534,6 +537,10 @@ onSnapshot(planesCol,
 onSnapshot(reservasCol,
   snap=>{ reservas=snap.docs.map(d=>({id:d.id,...d.data()})); _listo.reservas=true; render(); reRenderPublicaSiCorresponde(); },
   err=>{ console.error("Error leyendo reservas:",err); _listo.reservas=true; reRenderPublicaSiCorresponde(); }
+);
+onSnapshot(cancelacionesCol,
+  snap=>{ cancelaciones=snap.docs.map(d=>({id:d.id,...d.data()})); _listo.cancelaciones=true; render(); reRenderPublicaSiCorresponde(); },
+  err=>{ console.error("Error leyendo cancelaciones:",err); _listo.cancelaciones=true; reRenderPublicaSiCorresponde(); }
 );
 onSnapshot(configCol,
   snap=>{ snap.docs.forEach(d=>{ if(d.id==="gym"){ gymConfig={...gymConfig,...d.data()}; const el=document.getElementById("sb-gymname"); if(el) el.textContent=gymConfig.nombre; }}); _listo.config=true; },
@@ -865,18 +872,22 @@ function renderReservas(){
   const filas=ocurrencias.length?ocurrencias.map(o=>{
     const nombres=reservas.filter(r=>r.horarioId===o.horarioId&&r.fecha===o.fechaISO);
     const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
-    const estado=o.motivoCerrado==="cupo"?`<span style="color:#ff5050;font-weight:600;">❌ Cupo lleno</span>`
+    const estado=o.motivoCerrado==="cancelada"?`<span style="color:#ff8080;font-weight:600;">🚫 Cancelada</span>`
+      :o.motivoCerrado==="cupo"?`<span style="color:#ff5050;font-weight:600;">❌ Cupo lleno</span>`
       :o.motivoCerrado==="tiempo"?`<span style="color:#777;font-weight:600;">🔒 Cerrado (falta &lt;3hs)</span>`
       :`<span style="color:#06d6a0;font-weight:600;">${o.libres} libre${o.libres!==1?"s":""}</span>`;
-    return `<div class="card" style="margin-bottom:12px;">
+    return `<div class="card" style="margin-bottom:12px;${o.cancelada?"opacity:0.6;":""}">
       <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
         <div>
           <div style="font-weight:700;text-transform:capitalize;">${fechaLbl} · ${o.hora}</div>
           <div style="font-size:12px;color:#888;margin-top:2px;">${o.clase} — ${o.anotadas}/${o.cupo} anotadas</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           ${estado}
           <button class="horario-del" style="position:static;background:rgba(232,196,0,0.12);color:var(--fire);" onclick="abrirEditarHorario('${o.horarioId}')">✎ Cupo</button>
+          ${o.cancelada
+            ?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="reactivarClase('${o.horarioId}','${o.fechaISO}')">↺ Reactivar</button>`
+            :`<button class="horario-del" style="position:static;" onclick="cancelarClase('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">🚫 Cancelar (feriado)</button>`}
         </div>
       </div>
       ${nombres.length?`<div style="padding:0 20px 16px;display:flex;flex-wrap:wrap;gap:6px;">
@@ -896,7 +907,7 @@ function renderReservas(){
         <button class="btn btn-fire" onclick="copiarLinkReservas()">📋 Copiar link</button>
       </div>
       <div style="padding:0 20px 16px;font-size:12px;color:#666;line-height:1.6;">
-        Muestra las clases de esta semana. A partir del sábado a la noche se suma también la semana siguiente. Cada clase se cierra sola 3hs antes de empezar, o cuando se llena el cupo.
+        Muestra las clases de esta semana. A partir del sábado a la noche se suma también la semana siguiente. Cada clase se cierra sola 3hs antes de empezar, o cuando se llena el cupo. Para feriados o clases puntuales que no se dictan, usá "🚫 Cancelar" en esa clase — no hace falta tocar el horario fijo.
       </div>
     </div>
     ${filas}
@@ -917,6 +928,17 @@ window.eliminarReserva=async function(id){
   if(!confirm("¿Quitar esta reserva?")) return;
   await deleteDoc(doc(db,"reservas",id));
   toast("Reserva eliminada");
+}
+
+window.cancelarClase=async function(horarioId,fechaISO,etiqueta){
+  if(!confirm(`¿Cancelar "${etiqueta}"?\n\nNo se va a poder reservar ni contar en el cupo. Si ya hay anotadas, avisales por WhatsApp aparte — esto no les manda ningún mensaje.`)) return;
+  await setDoc(doc(db,"cancelaciones",`${horarioId}_${fechaISO}`),{horarioId,fecha:fechaISO,creado:new Date().toISOString()});
+  toast("Clase cancelada 🚫");
+}
+
+window.reactivarClase=async function(horarioId,fechaISO){
+  await deleteDoc(doc(db,"cancelaciones",`${horarioId}_${fechaISO}`));
+  toast("Clase reactivada ✓");
 }
 
 // CONFIG
@@ -1239,7 +1261,7 @@ function mostrarClasesParaSocia(){
   } else {
     const items=ocurrencias.length?ocurrencias.map((o,i)=>{
       const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
-      const estadoTxt=o.motivoCerrado==="cupo"?"❌ Cupo lleno":o.motivoCerrado==="tiempo"?"🔒 Cerrado (falta menos de 3hs)":`${o.libres} lugar${o.libres!==1?"es":""} libre${o.libres!==1?"s":""}`;
+      const estadoTxt=o.motivoCerrado==="cancelada"?"🚫 No se dicta (feriado / cancelada)":o.motivoCerrado==="cupo"?"❌ Cupo lleno":o.motivoCerrado==="tiempo"?"🔒 Cerrado (falta menos de 3hs)":`${o.libres} lugar${o.libres!==1?"es":""} libre${o.libres!==1?"s":""}`;
       return `<div class="rv-card">
         <div class="rv-fecha">${fechaLbl} · ${o.hora}</div>
         <div class="rv-clase">${o.clase}</div>
@@ -1775,7 +1797,7 @@ if(params.get("inscripcion")==="1"){
   // Reservas de WhatsApp: público, espera a que lleguen horarios y reservas de verdad
   vistaPublica="reservar";
   document.getElementById("app-shell").style.display="none";
-  esperarDatosPublicos(["horarios","reservas"], mostrarReservasPublico);
+  esperarDatosPublicos(["horarios","reservas","cancelaciones"], mostrarReservasPublico);
 } else {
   onAuthStateChanged(auth, user=>{
     if(user){
