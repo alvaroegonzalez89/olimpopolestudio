@@ -973,8 +973,9 @@ function renderConfig(){
           </td>
         </tr>`).join("") || `<tr><td colspan="3" style="color:#555;text-align:center;padding:22px;">Sin planes cargados todavía</td></tr>`}
       </tbody></table>
-      <div style="padding:16px 22px;">
+      <div style="padding:16px 22px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-fire" onclick="abrirNuevoPlan()">+ Nuevo plan</button>
+        <button class="btn btn-ghost" onclick="reordenarPlanes()">↕️ Reordenar automáticamente</button>
       </div>
     </div>
     <div class="card">
@@ -1012,11 +1013,40 @@ window.abrirEditarPlan=function(id){
   document.getElementById("pl-precio").value=p.precio||"";
   document.getElementById("modal-plan").style.display="flex";
 }
+// ── ORDEN AUTOMÁTICO DE PLANES ──
+// Agrupa por modalidad y, dentro de cada grupo, de menor a mayor cantidad de clases.
+// Las "sueltas" (clase por única vez) siempre van al final, sea de la modalidad que sea.
+function categoriaPlan(nombre){
+  const n=(nombre||"").toLowerCase();
+  if(/inscripci/.test(n)) return 0;
+  if(/suelta/.test(n)) return 5;
+  if(/promo|actividades/.test(n)) return 4;
+  if(/pole\s*sport/.test(n)) return 1;
+  if(/exotic/.test(n)) return 2;
+  if(/streching|stretching|flexibilidad/.test(n)) return 3;
+  return 6;
+}
+function ordenParaPlan(nombre){
+  const cat=categoriaPlan(nombre);
+  const m=(nombre||"").match(/x\s*(\d+)/i);
+  const num=m?Number(m[1]):0;
+  return cat*100+num;
+}
+
+window.reordenarPlanes=async function(){
+  let cambios=0;
+  for(const p of planes){
+    const nuevoOrden=ordenParaPlan(p.nombre);
+    if(nuevoOrden!==p.orden){ await updateDoc(doc(db,"planes",p.id),{orden:nuevoOrden}); cambios++; }
+  }
+  toast(cambios?"Planes reordenados ✓":"Ya estaban ordenados");
+}
+
 window.guardarPlan=async function(){
   const nombre=document.getElementById("pl-nombre").value.trim();
   const precio=Number(document.getElementById("pl-precio").value||0);
   if(!nombre) return toast("Completá el nombre del plan","err");
-  const data={nombre,precio,orden:planes.length+1};
+  const data={nombre,precio,orden:ordenParaPlan(nombre)};
   const id=document.getElementById("pl-id").value;
   if(id) await updateDoc(doc(db,"planes",id),data);
   else await addDoc(planesCol,data);
