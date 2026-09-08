@@ -311,6 +311,21 @@ tr:hover td{background:rgba(255,255,255,0.015);}
   </div>
 </div>
 
+<!-- MODAL RESERVA MANUAL -->
+<div class="modal-bg" id="modal-reserva-manual" style="display:none;">
+  <div class="modal-box">
+    <div class="modal-title">+ Agregar a la clase</div>
+    <div id="rm-etiqueta" style="font-size:13px;color:#888;margin-bottom:14px;"></div>
+    <input type="hidden" id="rm-horario-id"/>
+    <input type="hidden" id="rm-fecha-iso"/>
+    <div class="fg"><label class="fl">Nombre y apellido</label><input class="fi" id="rm-nombre" placeholder="Ej: Sofía Ramírez" onkeydown="if(event.key==='Enter')guardarReservaManual()"/></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="document.getElementById('modal-reserva-manual').style.display='none'">Cancelar</button>
+      <button class="btn btn-fire" onclick="guardarReservaManual()">Agregar</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL COMPROBANTE -->
 <div class="modal-bg" id="modal-comprobante" style="display:none;">
   <div class="modal-box" style="width:400px;padding:0;overflow:hidden;">
@@ -885,13 +900,14 @@ function renderReservas(){
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           ${estado}
           <button class="horario-del" style="position:static;background:rgba(232,196,0,0.12);color:var(--fire);" onclick="abrirEditarHorario('${o.horarioId}')">✎ Cupo</button>
+          ${!o.cancelada?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="abrirAgregarReserva('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">+ Agregar</button>`:""}
           ${o.cancelada
             ?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="reactivarClase('${o.horarioId}','${o.fechaISO}')">↺ Reactivar</button>`
             :`<button class="horario-del" style="position:static;" onclick="cancelarClase('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">🚫 Cancelar (feriado)</button>`}
         </div>
       </div>
       ${nombres.length?`<div style="padding:0 20px 16px;display:flex;flex-wrap:wrap;gap:6px;">
-        ${nombres.map(n=>`<span style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:999px;padding:4px 10px 4px 12px;font-size:12px;display:flex;align-items:center;gap:6px;">${n.nombre}<button onclick="eliminarReserva('${n.id}')" style="background:none;border:none;color:#666;cursor:pointer;font-size:12px;">✕</button></span>`).join("")}
+        ${nombres.map(n=>`<span style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:999px;padding:4px 10px 4px 12px;font-size:12px;display:flex;align-items:center;gap:6px;">${n.nombre}${n.agregadoPorAdmin?` <span style="color:#06d6a0;">· manual</span>`:""}<button onclick="eliminarReserva('${n.id}')" style="background:none;border:none;color:#666;cursor:pointer;font-size:12px;">✕</button></span>`).join("")}
       </div>`:""}
     </div>`;
   }).join(""):`<div class="empty">No hay clases disponibles esta semana. Cargá horarios primero.</div>`;
@@ -939,6 +955,30 @@ window.cancelarClase=async function(horarioId,fechaISO,etiqueta){
 window.reactivarClase=async function(horarioId,fechaISO){
   await deleteDoc(doc(db,"cancelaciones",`${horarioId}_${fechaISO}`));
   toast("Clase reactivada ✓");
+}
+
+window.abrirAgregarReserva=function(horarioId,fechaISO,etiqueta){
+  document.getElementById("rm-horario-id").value=horarioId;
+  document.getElementById("rm-fecha-iso").value=fechaISO;
+  document.getElementById("rm-etiqueta").textContent=etiqueta;
+  document.getElementById("rm-nombre").value="";
+  document.getElementById("modal-reserva-manual").style.display="flex";
+}
+
+window.guardarReservaManual=async function(){
+  const nombre=document.getElementById("rm-nombre").value.trim();
+  if(!nombre) return toast("Escribí el nombre y apellido","err");
+  const horarioId=document.getElementById("rm-horario-id").value;
+  const fechaISO=document.getElementById("rm-fecha-iso").value;
+  const h=horarios.find(x=>x.id===horarioId);
+  await addDoc(reservasCol,{
+    horarioId, fecha:fechaISO,
+    dia:h?.dia||"", hora:h?.hora||"", clase:h?.clase||"",
+    nombre, documento:"", agregadoPorAdmin:true,
+    creado:new Date().toISOString()
+  });
+  document.getElementById("modal-reserva-manual").style.display="none";
+  toast(`${nombre} agregada ✓`);
 }
 
 // CONFIG
