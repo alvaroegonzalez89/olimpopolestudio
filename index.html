@@ -903,7 +903,7 @@ function renderReservas(){
           ${!o.cancelada?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="abrirAgregarReserva('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">+ Agregar</button>`:""}
           ${o.cancelada
             ?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="reactivarClase('${o.horarioId}','${o.fechaISO}')">↺ Reactivar</button>`
-            :`<button class="horario-del" style="position:static;" onclick="cancelarClase('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">🚫 Cancelar (feriado)</button>`}
+            :`<button class="horario-del" style="position:static;" onclick="cancelarClase('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">🚫 Cancelar (cerrado)</button>`}
         </div>
       </div>
       ${nombres.length?`<div style="padding:0 20px 16px;display:flex;flex-wrap:wrap;gap:6px;">
@@ -923,7 +923,7 @@ function renderReservas(){
         <button class="btn btn-fire" onclick="copiarLinkReservas()">📋 Copiar link</button>
       </div>
       <div style="padding:0 20px 16px;font-size:12px;color:#666;line-height:1.6;">
-        Muestra las clases de esta semana. A partir del sábado a la noche se suma también la semana siguiente. Cada clase se cierra sola 3hs antes de empezar, o cuando se llena el cupo. Para feriados o clases puntuales que no se dictan, usá "🚫 Cancelar" en esa clase — no hace falta tocar el horario fijo.
+        Muestra las clases de esta semana. A partir del sábado a la noche se suma también la semana siguiente. Cada clase se cierra sola 3hs antes de empezar, o cuando se llena el cupo. Para clases puntuales que no se dictan, usá "🚫 Cancelar" en esa clase — no hace falta tocar el horario fijo.
       </div>
     </div>
     ${filas}
@@ -1331,7 +1331,7 @@ function mostrarClasesParaSocia(){
   } else {
     const items=ocurrencias.length?ocurrencias.map((o,i)=>{
       const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
-      const estadoTxt=o.motivoCerrado==="cancelada"?"🚫 No se dicta (feriado / cancelada)":o.motivoCerrado==="cupo"?"❌ Cupo lleno":o.motivoCerrado==="tiempo"?"🔒 Cerrado (falta menos de 3hs)":`${o.libres} lugar${o.libres!==1?"es":""} libre${o.libres!==1?"s":""}`;
+      const estadoTxt=o.motivoCerrado==="cancelada"?"🚫 No se dicta (cerrado)":o.motivoCerrado==="cupo"?"❌ Cupo lleno":o.motivoCerrado==="tiempo"?"🔒 Cerrado (falta menos de 3hs)":`${o.libres} lugar${o.libres!==1?"es":""} libre${o.libres!==1?"s":""}`;
       return `<div class="rv-card">
         <div class="rv-fecha">${fechaLbl} · ${o.hora}</div>
         <div class="rv-clase">${o.clase}</div>
