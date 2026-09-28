@@ -1250,6 +1250,9 @@ const RV_STYLES=`
     .btn-submit{width:100%;background:linear-gradient(135deg,#E8C400,#FFEA00);color:#0a0a0a;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;padding:12px;}
     .rv-foot{text-align:center;font-size:11px;color:#333;margin-top:20px;}
     .rv-err{background:rgba(255,80,80,0.08);border:1px solid rgba(255,80,80,0.3);color:#ff8080;border-radius:10px;padding:12px 14px;font-size:13px;margin-top:12px;text-align:center;}
+    .rv-asistentes-toggle{font-size:12px;color:#999;margin-top:10px;cursor:pointer;text-decoration:underline;text-decoration-color:#333;}
+    .rv-asistentes{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .rv-chip{background:rgba(255,255,255,0.06);border:1px solid #262626;border-radius:999px;padding:4px 11px;font-size:12px;color:#ccc;}
     /* Caño de progreso */
     .cano-wrap{display:flex;align-items:center;gap:18px;background:#141414;border:1px solid #232323;border-radius:14px;padding:20px;margin-bottom:16px;}
     .cano-tubo{position:relative;width:14px;height:110px;background:#0f0f0f;border-radius:7px;overflow:hidden;flex-shrink:0;border:1px solid #232323;}
@@ -1314,6 +1317,11 @@ window.buscarSocia=async function(){
 
 window.salirReserva=function(){ window._reservaSocia=null; mostrarReservasPublico(); }
 
+window.toggleAsistentes=function(i){
+  const el=document.getElementById(`rv-asistentes-${i}`);
+  if(el) el.style.display=el.style.display==="none"?"flex":"none";
+}
+
 // ── PASO 2: mostrar progreso + clases disponibles ──
 function mostrarClasesParaSocia(){
   const socia=window._reservaSocia;
@@ -1332,10 +1340,13 @@ function mostrarClasesParaSocia(){
     const items=ocurrencias.length?ocurrencias.map((o,i)=>{
       const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
       const estadoTxt=o.motivoCerrado==="cancelada"?"🚫 No se dicta (cerrado)":o.motivoCerrado==="cupo"?"❌ Cupo lleno":o.motivoCerrado==="tiempo"?"🔒 Cerrado (falta menos de 3hs)":`${o.libres} lugar${o.libres!==1?"es":""} libre${o.libres!==1?"s":""}`;
+      const asistentes=reservas.filter(r=>r.horarioId===o.horarioId&&r.fecha===o.fechaISO);
       return `<div class="rv-card">
         <div class="rv-fecha">${fechaLbl} · ${o.hora}</div>
         <div class="rv-clase">${o.clase}</div>
         <div class="rv-cupo ${o.cerrado?"rv-cerrado":"rv-abierto"}">${estadoTxt}</div>
+        ${asistentes.length?`<div class="rv-asistentes-toggle" onclick="toggleAsistentes(${i})">👥 Ver quiénes van (${asistentes.length})</div>
+        <div class="rv-asistentes" id="rv-asistentes-${i}" style="display:none;">${asistentes.map(a=>`<span class="rv-chip">${a.nombre}</span>`).join("")}</div>`:`<div class="rv-asistentes-toggle" style="color:#444;">Todavía nadie se anotó</div>`}
         ${o.cerrado?`<button class="rv-btn" disabled>Cerrado</button>`:`<button class="rv-btn" onclick="confirmarReserva(${i})">Reservar</button>`}
       </div>`;
     }).join(""):`<div style="text-align:center;color:#555;padding:30px 10px;">No hay clases disponibles por ahora.</div>`;
