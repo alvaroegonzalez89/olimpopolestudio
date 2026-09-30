@@ -152,6 +152,36 @@ tr:hover td{background:rgba(255,255,255,0.015);}
 .cupos-bajo{color:#FFEA00;}
 .cupos-lleno{color:#ff5050;}
 .horario-del{position:absolute;top:8px;right:8px;background:rgba(255,80,80,0.1);border:none;border-radius:6px;color:#ff5050;font-size:11px;padding:3px 7px;cursor:pointer;}
+
+/* AGENDA (grilla semanal de Reservas) */
+.ag-scroll{overflow-x:auto;padding-bottom:8px;}
+.ag-grid{display:grid;gap:8px;min-width:900px;}
+.ag-head{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 8px;text-align:center;}
+.ag-head-dia{font-weight:700;font-size:13px;text-transform:capitalize;}
+.ag-head-fecha{font-size:11px;color:#777;text-transform:capitalize;margin-top:1px;}
+.ag-head-total{font-size:10px;color:var(--fire);margin-top:4px;font-weight:600;}
+.ag-row{display:contents;}
+.ag-hora{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#888;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 4px;}
+.ag-cell{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;min-height:64px;}
+.ag-vacia{display:flex;align-items:center;justify-content:center;color:#2c2c2c;font-size:16px;min-height:64px;}
+.ag-abierto{border-color:rgba(6,214,160,0.25);}
+.ag-lleno{border-color:rgba(255,80,80,0.3);}
+.ag-cancelada{opacity:0.45;}
+.ag-cell-top{display:flex;justify-content:space-between;align-items:center;gap:6px;}
+.ag-frac{font-family:'Anton',sans-serif;font-size:15px;letter-spacing:0.5px;}
+.ag-acts{display:flex;gap:3px;}
+.ag-ico{background:rgba(255,255,255,0.05);border:none;border-radius:5px;color:#999;font-size:10px;padding:3px 5px;cursor:pointer;line-height:1;}
+.ag-ico:hover{background:rgba(232,196,0,0.15);color:var(--fire);}
+.ag-bar{height:3px;background:#1c1c1c;border-radius:3px;overflow:hidden;margin-top:6px;}
+.ag-bar-fill{height:100%;}
+.ag-clase{font-size:10px;color:#666;margin-top:6px;text-transform:uppercase;letter-spacing:0.5px;}
+.ag-nombres{margin-top:6px;display:flex;flex-direction:column;gap:3px;}
+.ag-persona{display:flex;align-items:center;gap:6px;font-size:11px;color:#ccc;}
+.ag-avatar{width:16px;height:16px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#0a0a0a;flex-shrink:0;}
+.ag-persona-nombre{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+.ag-quitar{background:none;border:none;color:#444;cursor:pointer;font-size:10px;flex-shrink:0;}
+.ag-quitar:hover{color:#ff5050;}
+.ag-sin{font-size:11px;color:#3a3a3a;text-align:center;padding:6px 0;}
 /* PROSPECT CARD */
 .prospect-nuevo{background:rgba(59,130,246,0.05);border-left:3px solid #3b82f6;}
 /* BOTTOM NAV */
@@ -512,8 +542,44 @@ function generarOcurrenciasSemana(){
   ocurrencias.sort((a,b)=>a.fecha-b.fecha);
   return ocurrencias;
 }
+
+// ── AGENDA (admin): una semana puntual, navegable, incluye clases pasadas ──
+function lunesDeOffset(offsetSemanas){
+  const ahora=new Date();
+  const diaJS=ahora.getDay();
+  const lunes=new Date(ahora);
+  lunes.setHours(0,0,0,0);
+  lunes.setDate(lunes.getDate()-((diaJS+6)%7)+offsetSemanas*7);
+  return lunes;
+}
+
+function generarOcurrenciasParaSemana(offsetSemanas){
+  const lunes=lunesDeOffset(offsetSemanas);
+  const ahora=new Date();
+  const ocurrencias=[];
+  for(const h of horarios){
+    const offsetDias=DIAS_ORDEN.indexOf(h.dia);
+    if(offsetDias<0) continue;
+    const [hh,mm]=(h.hora||"00:00").split(":").map(Number);
+    const fecha=new Date(lunes);
+    fecha.setDate(fecha.getDate()+offsetDias);
+    fecha.setHours(hh||0,mm||0,0,0);
+    const fISO=fechaISO(fecha);
+    const cancelada=cancelaciones.some(c=>c.horarioId===h.id&&c.fecha===fISO);
+    const cupo=Number(h.cupoReservas||h.cupos||8);
+    const nombres=reservas.filter(r=>r.horarioId===h.id&&r.fecha===fISO);
+    const libres=Math.max(cupo-nombres.length,0);
+    ocurrencias.push({
+      horarioId:h.id, dia:h.dia, hora:h.hora, clase:h.clase, fecha, fechaISO:fISO,
+      cupo, nombres, libres, cancelada, pasada:fecha<ahora
+    });
+  }
+  ocurrencias.sort((a,b)=>a.fecha-b.fecha);
+  return {lunes, ocurrencias};
+}
 let alumnos=[], horarios=[], prospectos=[], planes=[], reservas=[], cancelaciones=[];
 let vistaActual="hero", mesVista=new Date().getMonth(), añoVista=new Date().getFullYear();
+let agendaOffset=0;
 let busqueda="", activoForm=true, pendingDeleteId=null, pendingDeleteType="alumno";
 let _comprobante=null, _transferSocio=null, _pendientesLista=[], _recIdx=0;
 let gymConfig={nombre:"Olimpo Pole Studio",banco:"",cbu:"",alias:"olimpo.maca",titular:"Sergio Baca",direccion:"Barcala 359",telefono:"2604811028",instagram:"olimpo.pole.sr"};
@@ -881,54 +947,91 @@ function renderHorarios(){
 }
 
 // ── RESERVAS (admin) ──
+function horaAMinutos(h){ const [hh,mm]=(h||"0:0").split(":").map(Number); return hh*60+(mm||0); }
+
 function renderReservas(){
-  const ocurrencias=generarOcurrenciasSemana();
+  const {lunes,ocurrencias}=generarOcurrenciasParaSemana(agendaOffset);
   const link=`${window.location.origin}${window.location.pathname}?reservar=1`;
-  const filas=ocurrencias.length?ocurrencias.map(o=>{
-    const nombres=reservas.filter(r=>r.horarioId===o.horarioId&&r.fecha===o.fechaISO);
-    const fechaLbl=o.fecha.toLocaleDateString("es-AR",{weekday:"long",day:"2-digit",month:"2-digit"});
-    const estado=o.motivoCerrado==="cancelada"?`<span style="color:#ff8080;font-weight:600;">🚫 Cancelada</span>`
-      :o.motivoCerrado==="cupo"?`<span style="color:#ff5050;font-weight:600;">❌ Cupo lleno</span>`
-      :o.motivoCerrado==="tiempo"?`<span style="color:#777;font-weight:600;">🔒 Cerrado (falta &lt;3hs)</span>`
-      :`<span style="color:#06d6a0;font-weight:600;">${o.libres} libre${o.libres!==1?"s":""}</span>`;
-    return `<div class="card" style="margin-bottom:12px;${o.cancelada?"opacity:0.6;":""}">
-      <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
-        <div>
-          <div style="font-weight:700;text-transform:capitalize;">${fechaLbl} · ${o.hora}</div>
-          <div style="font-size:12px;color:#888;margin-top:2px;">${o.clase} — ${o.anotadas}/${o.cupo} anotadas</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          ${estado}
-          <button class="horario-del" style="position:static;background:rgba(232,196,0,0.12);color:var(--fire);" onclick="abrirEditarHorario('${o.horarioId}')">✎ Cupo</button>
-          ${!o.cancelada?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="abrirAgregarReserva('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">+ Agregar</button>`:""}
-          ${o.cancelada
-            ?`<button class="horario-del" style="position:static;background:rgba(6,214,160,0.12);color:#06d6a0;" onclick="reactivarClase('${o.horarioId}','${o.fechaISO}')">↺ Reactivar</button>`
-            :`<button class="horario-del" style="position:static;" onclick="cancelarClase('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">🚫 Cancelar (cerrado)</button>`}
-        </div>
-      </div>
-      ${nombres.length?`<div style="padding:0 20px 16px;display:flex;flex-wrap:wrap;gap:6px;">
-        ${nombres.map(n=>`<span style="background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:999px;padding:4px 10px 4px 12px;font-size:12px;display:flex;align-items:center;gap:6px;">${n.nombre}${n.agregadoPorAdmin?` <span style="color:#06d6a0;">· manual</span>`:""}<button onclick="eliminarReserva('${n.id}')" style="background:none;border:none;color:#666;cursor:pointer;font-size:12px;">✕</button></span>`).join("")}
-      </div>`:""}
+
+  const dias=DIAS_ORDEN.filter(d=>d!=="Domingo").filter(d=>horarios.some(h=>h.dia===d));
+  const horasUnicas=[...new Set(horarios.map(h=>h.hora))].sort((a,b)=>horaAMinutos(a)-horaAMinutos(b));
+
+  const mapa={};
+  ocurrencias.forEach(o=>{ mapa[`${o.dia}_${o.hora}`]=o; });
+
+  const fechaDia=(dia)=>{ const idx=DIAS_ORDEN.indexOf(dia); const f=new Date(lunes); f.setDate(f.getDate()+idx); return f; };
+  const totalPorDia=(dia)=>ocurrencias.filter(o=>o.dia===dia).reduce((s,o)=>s+o.nombres.length,0);
+
+  const headerCells=dias.map(d=>{
+    const f=fechaDia(d);
+    return `<div class="ag-head">
+      <div class="ag-head-dia">${d}</div>
+      <div class="ag-head-fecha">${f.toLocaleDateString("es-AR",{day:"2-digit",month:"short"})}</div>
+      <div class="ag-head-total">${totalPorDia(d)} reservas</div>
     </div>`;
-  }).join(""):`<div class="empty">No hay clases disponibles esta semana. Cargá horarios primero.</div>`;
+  }).join("");
+
+  const filas=horasUnicas.map(hora=>{
+    const celdas=dias.map(dia=>{
+      const o=mapa[`${dia}_${hora}`];
+      if(!o) return `<div class="ag-cell ag-vacia">—</div>`;
+      const pct=o.cupo?Math.min(100,Math.round((o.nombres.length/o.cupo)*100)):0;
+      const lleno=o.libres<=0;
+      const claseEstado=o.cancelada?"ag-cancelada":lleno?"ag-lleno":"ag-abierto";
+      return `<div class="ag-cell ${claseEstado}">
+        <div class="ag-cell-top">
+          <span class="ag-frac">${o.cancelada?"🚫":`${o.nombres.length}/${o.cupo}`}</span>
+          <div class="ag-acts">
+            <button class="ag-ico" title="Editar cupo" onclick="abrirEditarHorario('${o.horarioId}')">✎</button>
+            ${o.cancelada
+              ?`<button class="ag-ico" title="Reactivar" onclick="reactivarClase('${o.horarioId}','${o.fechaISO}')">↺</button>`
+              :`<button class="ag-ico" title="Cancelar (cerrado)" onclick="cancelarClase('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">🚫</button>`}
+            ${!o.cancelada?`<button class="ag-ico" title="Agregar" onclick="abrirAgregarReserva('${o.horarioId}','${o.fechaISO}','${o.dia} ${o.hora} — ${o.clase}')">+</button>`:""}
+          </div>
+        </div>
+        ${!o.cancelada?`<div class="ag-bar"><div class="ag-bar-fill" style="width:${pct}%;background:${lleno?"#ff5050":"linear-gradient(90deg,#E8C400,#FFEA00)"};"></div></div>`:""}
+        <div class="ag-clase">${o.clase}</div>
+        <div class="ag-nombres">
+          ${o.nombres.map(n=>`<div class="ag-persona" title="${n.nombre}${n.agregadoPorAdmin?" (manual)":""}">
+            <span class="ag-avatar" style="background:${avatarColor(n.nombre)}">${n.nombre[0]}</span>
+            <span class="ag-persona-nombre">${n.nombre}</span>
+            <button class="ag-quitar" onclick="eliminarReserva('${n.id}')">✕</button>
+          </div>`).join("")||`<div class="ag-sin">Sin reservas</div>`}
+        </div>
+      </div>`;
+    }).join("");
+    return `<div class="ag-row"><div class="ag-hora">${hora}</div>${celdas}</div>`;
+  }).join("");
+
+  const rango=`${lunes.toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit"})} al ${(()=>{const f=new Date(lunes);f.setDate(f.getDate()+(dias.length?DIAS_ORDEN.indexOf(dias[dias.length-1]):5));return f.toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit"});})()}`;
 
   return `<div class="page">
     <div class="topbar">
-      <div><div class="eyebrow">Anotate a la clase por WhatsApp</div><div class="page-title">Reservas</div></div>
-    </div>
-    <div class="card" style="margin-bottom:22px;">
-      <div class="card-header"><div class="card-title">🔗 Link para el grupo de WhatsApp</div><div style="font-size:12px;color:#555;">Siempre es el mismo — mandalo una sola vez</div></div>
-      <div style="padding:16px 20px;display:flex;gap:8px;flex-wrap:wrap;">
-        <input class="fi" readonly value="${link}" onclick="this.select()" style="flex:1;min-width:220px;"/>
-        <button class="btn btn-fire" onclick="copiarLinkReservas()">📋 Copiar link</button>
-      </div>
-      <div style="padding:0 20px 16px;font-size:12px;color:#666;line-height:1.6;">
-        Muestra las clases de esta semana. A partir del sábado a la noche se suma también la semana siguiente. Cada clase se cierra sola 3hs antes de empezar, o cuando se llena el cupo. Para clases puntuales que no se dictan, usá "🚫 Cancelar" en esa clase — no hace falta tocar el horario fijo.
+      <div><div class="eyebrow">Agenda semanal</div><div class="page-title">Reservas</div></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-ghost" onclick="cambiarSemanaAgenda(-1)">◀</button>
+        <button class="btn btn-ghost" onclick="agendaOffset=0;render();" style="min-width:130px;">${agendaOffset===0?"Esta semana":rango}</button>
+        <button class="btn btn-ghost" onclick="cambiarSemanaAgenda(1)">▶</button>
+        <button class="btn btn-fire" onclick="copiarLinkReservas()">🔗 Link para alumnas</button>
       </div>
     </div>
-    ${filas}
+    <div class="card" style="margin-bottom:18px;">
+      <div style="padding:12px 20px;font-size:12px;color:#666;line-height:1.6;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+        <span>Semana del <strong style="color:#999;">${rango}</strong> — ${agendaOffset===0?"clases de hoy en adelante y ya dictadas":agendaOffset>0?"semana futura":"semana pasada (historial)"}</span>
+        <span>El link siempre es el mismo, no hace falta generarlo de nuevo</span>
+      </div>
+    </div>
+    <div class="ag-scroll">
+      <div class="ag-grid" style="grid-template-columns:64px repeat(${dias.length},minmax(150px,1fr));">
+        <div class="ag-head" style="visibility:hidden;"></div>
+        ${headerCells}
+        ${filas}
+      </div>
+    </div>
   </div>`;
 }
+
+window.cambiarSemanaAgenda=function(delta){ agendaOffset+=delta; render(); }
 
 window.copiarLinkReservas=async function(){
   const link=`${window.location.origin}${window.location.pathname}?reservar=1`;
